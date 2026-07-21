@@ -1,13 +1,13 @@
 #library managment system
 import mysql.connector
 
-admin_username = "vignesh"
-admin_password = "vignesh123"
+admin_username = "your_name"
+admin_password = "your_password"
 
 database = mysql.connector.connect(
     host="localhost",
     username="root",
-    password="mond@y09:39",
+    password="your_password",
     database="Library"
 )
 remote = database.cursor()
