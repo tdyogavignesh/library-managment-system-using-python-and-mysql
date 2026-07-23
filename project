@@ -1,46 +1,51 @@
-#library managment system
 import mysql.connector
+import hashlib
+from getpass import getpass
 
 admin_username = "your_name"
 admin_password = "your_password"
 
-database = mysql.connector.connect(
-    host="localhost",
-    username="root",
-    password="your_password",
-    database="Library"
-)
+try:
+    database = mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="your_password",
+        database="Library"
+    )
+except mysql.connector.Error as err:
+    print(f"Database connection error: {err}")
+    raise SystemExit
+
 remote = database.cursor()
 
-remote.execute("""CREATE TABLE IF NOT EXISTS Books(
-   Book_ID INT PRIMARY KEY AUTO_INCREMENT,
-   Book_name VARCHAR(200) NOT NULL,
-   Author_name VARCHAR(100) NOT NULL,
-   No_of_books INT
-)""")
-database.commit()
-
-remote.execute("""CREATE TABLE IF NOT EXISTS Customers(
+remote.execute("""
+CREATE TABLE IF NOT EXISTS Books(
+    Book_ID INT PRIMARY KEY AUTO_INCREMENT,
+    Book_name VARCHAR(200) NOT NULL,
+    Author_name VARCHAR(100) NOT NULL,
+    No_of_books INT NOT NULL DEFAULT 0
+)
+""")
+remote.execute("""
+CREATE TABLE IF NOT EXISTS Customers(
     Customer_ID INT PRIMARY KEY AUTO_INCREMENT,
     Name VARCHAR(100) NOT NULL,
     DATE_OF_BIRTH DATE,
-    Password VARCHAR(100) NOT NULL
-)""")
-database.commit()
-
+    Password VARCHAR(64) NOT NULL
+)
+""")
 remote.execute("""
 CREATE TABLE IF NOT EXISTS Issued_books(
     Issued_ID INT PRIMARY KEY AUTO_INCREMENT,
     Book_ID INT NOT NULL,
+    Customer_ID INT,
     Taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (Book_ID) REFERENCES Books(Book_ID)
 )
 """)
-database.commit()
-
 remote.execute("""
 CREATE TABLE IF NOT EXISTS Customer_data(
-    Customer_ID INT AUTO_INCREMENT PRIMARY KEY,
+    Log_ID INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) NOT NULL,
     Status VARCHAR(30),
     DATE_AND_TIME TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -48,10 +53,16 @@ CREATE TABLE IF NOT EXISTS Customer_data(
 """)
 database.commit()
 
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
 def add_book():
-    book_name = input("Enter the name of the book: ")
-    author_name = input("Enter the name of the author: ")
+    book_name = input("Enter the name of the book: ").strip()
+    author_name = input("Enter the name of the author: ").strip()
     no_of_books = int(input("Enter the number of books: "))
+
     remote.execute(
         "INSERT INTO Books (Book_name, Author_name, No_of_books) VALUES (%s, %s, %s)",
         (book_name, author_name, no_of_books)
@@ -59,11 +70,17 @@ def add_book():
     database.commit()
     print(f"Book '{book_name}' by {author_name} added successfully.")
 
+
 def remove_book():
-    book_name = input("Enter the name of the book to remove: ")
+    book_name = input("Enter the name of the book to remove: ").strip()
     remote.execute("DELETE FROM Books WHERE Book_name = %s", (book_name,))
     database.commit()
-    print(f"Book '{book_name}' removed successfully.")
+
+    if remote.rowcount > 0:
+        print(f"Book '{book_name}' removed successfully.")
+    else:
+        print(f"Book '{book_name}' not found.")
+
 
 def show_books():
     remote.execute("SELECT * FROM Books")
@@ -73,31 +90,33 @@ def show_books():
     for book in books:
         print(f"ID: {book[0]}, Name: {book[1]}, Author: {book[2]}, Quantity: {book[3]}")
 
-def barrow_books():
-    book = input("Enter the name of the book you want to borrow: ")
-    remote.execute("SELECT * FROM Books WHERE Book_name = %s", (book,))
-    book1 = remote.fetchone()
 
-    if book1 is None:
-        print(f"Book '{book}' not found in the library.")
+def borrow_book():
+    book_name = input("Enter the name of the book you want to borrow: ").strip()
+    remote.execute("SELECT Book_ID, No_of_books FROM Books WHERE Book_name = %s", (book_name,))
+    book = remote.fetchone()
+
+    if book is None:
+        print(f"Book '{book_name}' not found in the library.")
         return
 
-    if book1[3] > 0:
+    if book[1] > 0:
         remote.execute(
             "INSERT INTO Issued_books (Book_ID) VALUES (%s)",
-            (book1[0],)
+            (book[0],)
         )
         remote.execute(
             "UPDATE Books SET No_of_books = No_of_books - 1 WHERE Book_ID = %s",
-            (book1[0],)
+            (book[0],)
         )
         database.commit()
-        print(f"Book '{book}' issued successfully.")
+        print(f"Book '{book_name}' issued successfully.")
     else:
-        print(f"Book '{book}' is currently not available.")
+        print(f"Book '{book_name}' is currently not available.")
+
 
 def return_book():
-    book_name = input("Enter the name of the book you want to return: ")
+    book_name = input("Enter the name of the book you want to return: ").strip()
 
     remote.execute("SELECT Book_ID FROM Books WHERE Book_name = %s", (book_name,))
     book = remote.fetchone()
@@ -126,20 +145,24 @@ def return_book():
     database.commit()
     print(f"Book '{book_name}' returned successfully.")
 
+
 def registration():
-    name = input("Enter your name: ")
-    password = input("Enter your password: ")
-    dob = input("Enter your date of birth (YYYY-MM-DD): ")
+    name = input("Enter your name: ").strip()
+    password1 = getpass("Enter your password: ")
+    dob = input("Enter your date of birth (YYYY-MM-DD): ").strip()
+
+    hashed_password = hash_password(password1)
 
     remote.execute(
         "INSERT INTO Customers (Name, Password, DATE_OF_BIRTH) VALUES (%s, %s, %s)",
-        (name, password, dob)
+        (name, hashed_password, dob)
     )
     database.commit()
     print(f"Customer '{name}' registered successfully.")
 
+
 def update_book_quantity():
-    book_name = input("Enter the name of the book: ")
+    book_name = input("Enter the name of the book: ").strip()
     new_quantity = int(input("Enter the new quantity: "))
 
     remote.execute(
@@ -153,12 +176,14 @@ def update_book_quantity():
     else:
         print(f"Book '{book_name}' not found.")
 
+
 def log_in(username):
     remote.execute(
         "INSERT INTO Customer_data(username, Status) VALUES (%s, %s)",
         (username, "Customer logged in")
     )
     database.commit()
+
 
 def log_out(username):
     remote.execute(
@@ -167,14 +192,16 @@ def log_out(username):
     )
     database.commit()
 
+
 def admin_login():
-    username = input("Enter admin username: ")
-    password = input("Enter admin password: ")
+    username = input("Enter admin username: ").strip()
+    password = getpass("Enter admin password: ")
+
     if username == admin_username and password == admin_password:
         print("Admin login successful.")
         while True:
             print("-" * 50)
-            print("\nAdmin Menu:")
+            print("Admin Menu:")
             print("-" * 50)
             print("1. Add Book")
             print("2. Remove Book")
@@ -182,7 +209,8 @@ def admin_login():
             print("4. Update Book Quantity")
             print("5. Customer Data")
             print("6. Log out")
-            choice = input("Enter your choice: ")
+
+            choice = input("Enter your choice: ").strip()
 
             if choice == '1':
                 add_book()
@@ -193,7 +221,7 @@ def admin_login():
             elif choice == '4':
                 update_book_quantity()
             elif choice == '5':
-                remote.execute("SELECT * FROM Customer_data")
+                remote.execute("SELECT * FROM Customer_data ORDER BY DATE_AND_TIME DESC")
                 result = remote.fetchall()
                 for row in result:
                     print(row)
@@ -205,37 +233,15 @@ def admin_login():
     else:
         print("Invalid admin credentials.")
 
+
 def customer_login():
-    username = input("Enter your name: ")
-    cross_check = input("Do you remember your password? (yes/no): ").lower()
+    username = input("Enter your name: ").strip()
+    password1 = getpass("Enter your password: ")
+    hashed = hash_password(password1)
 
-    if cross_check == 'no':
-        dob = input("Enter your date of birth (YYYY-MM-DD): ")
-        remote.execute(
-            "SELECT * FROM Customers WHERE Name = %s AND DATE_OF_BIRTH = %s",
-            (username, dob)
-        )
-        result = remote.fetchone()
-
-        if result is None:
-            print("No account found with that name and date of birth.")
-            return
-        else:
-            remote.execute(
-                "SELECT Password FROM Customers WHERE Name = %s AND DATE_OF_BIRTH = %s",
-                (username, dob)
-            )
-            password_result = remote.fetchone()
-            if password_result:
-                print(f"Your password is: {password_result[0]}")
-            else:
-                print("Password not found.")
-            return
-
-    password = input("Enter your password: ")
     remote.execute(
         "SELECT * FROM Customers WHERE Name = %s AND Password = %s",
-        (username, password)
+        (username, hashed)
     )
     result = remote.fetchone()
 
@@ -248,16 +254,17 @@ def customer_login():
 
     while True:
         print("-" * 50)
-        print("\nCustomer Menu:")
+        print("Customer Menu:")
         print("-" * 50)
         print("1. Borrow Book")
         print("2. Return Book")
         print("3. Show Books")
         print("4. Log out")
-        choice = input("Enter your choice: ")
+
+        choice = input("Enter your choice: ").strip()
 
         if choice == '1':
-            barrow_books()
+            borrow_book()
         elif choice == '2':
             return_book()
         elif choice == '3':
@@ -269,15 +276,21 @@ def customer_login():
         else:
             print("Invalid choice. Please try again.")
 
+
 while True:
     print("-" * 50)
-    print("\nLibrary Management System")
+    print("Library Management System")
     print("-" * 50)
     print("1. Admin Login")
     print("2. Customer Login")
     print("3. Customer Registration")
     print("4. Exit")
-    choice = int(input("Enter your choice: "))
+
+    try:
+        choice = int(input("Enter your choice: "))
+    except ValueError:
+        print("Please enter a valid number.")
+        continue
 
     if choice == 1:
         admin_login()
@@ -287,6 +300,9 @@ while True:
         registration()
     elif choice == 4:
         break
+    else:
+        print("Invalid choice.")
 
+remote.close()
+database.close()
 print("Thank you for using our library system. Visit again!")
-
